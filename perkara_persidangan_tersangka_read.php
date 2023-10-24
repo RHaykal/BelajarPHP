@@ -1,0 +1,142 @@
+<?php
+session_start();
+header("Access-Control-Allow-Origin: *");
+header("Content-Type: application/json; charset=UTF-8");
+header("Access-Control-Allow-Headers: Origin, X-Api-Key, X-Requested-With, Content-Type, Accept, Authorization");
+
+require_once('require_files.php');
+
+if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
+    header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
+    header("Access-Control-Allow-Headers: Content-Type");
+    header("Access-Control-Allow-Headers: Token");
+    header("Access-Control-Allow-Headers: Origin, X-Api-Key, X-Requested-With, Content-Type, Accept, Authorization");
+    exit(0);
+}
+
+try {
+    // Connect to your database
+    $conn = new PDO("mysql:host=$MySQL_HOST;dbname=$MySQL_DB;charset=utf8", $MySQL_USER, $MySQL_PASSWORD);
+    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    tokenAuth($conn, 'operator');
+
+    // Read JSON data from the request body
+    $json_data = file_get_contents("php://input");
+    $request_data = json_decode($json_data);
+
+    // Check if the JSON data contains pagination parameters
+    $page = isset($request_data->page) ? (int) $request_data->page : 1; // Current page
+    $pageSize = isset($request_data->pageSize) ? (int) $request_data->pageSize : 10; // Number of records per page
+    $offset = ($page - 1) * $pageSize;
+
+    $filter_nama_perkara_persidangan_tersangka = isset($requestData['filter']['nama_perkara_persidangan_tersangka']) ? $requestData['filter']['nama_perkara_persidangan_tersangka'] : "";
+    $filter_nomor_perkara_persidangan_tersangka = isset($requestData['filter']['nomor_perkara_persidangan_tersangka']) ? $requestData['filter']['nomor_perkara_persidangan_tersangka'] : "";
+    $filter_nrp = isset($requestData['filter']['nrp']) ? $requestData['filter']['nrp'] : "";
+    $filter_nama_wbp = isset($requestData['filter']['nama']) ? $requestData['filter']['nama'] : "";
+    $filter_nama_perkara = isset($requestData['filter']['nama_perkara']) ? $requestData['filter']['nama_perkara'] : "";
+    $filter_status_perkara_persidangan_tersangka = isset($requestData['filter']['status_perkara_persidangan_tersangka']) ? $requestData['filter']['status_perkara_persidangan_tersangka'] : "";
+    $filter_tanggal_penetapan_tersangka = isset($requestData['filter']['tanggal_penetapan_tersangka']) ? $requestData['filter']['tanggal_penetapan_tersangka'] : "";
+    $filter_tanggal_registrasi_tersangka = isset($requestData['filter']['tanggal_registrasi_tersangka']) ? $requestData['filter']['tanggal_registrasi_tersangka'] : "";
+    $filter_nama_oditur = isset($requestData['filter']['nama_oditur']) ? $requestData['filter']['nama_oditur'] : "";
+
+    // Determine the sorting parameters (assuming they are passed as query parameters)
+    $sortField = isset($requestData['sortBy']) ? $requestData['sortBy'] : 'perkara_persidangan_tersangka.nama_perkara_persidangan_tersangka';
+    $sortOrder = isset($requestData['sortOrder']) ? $requestData['sortOrder'] : 'ASC';
+
+    // Validate and sanitize sortField to prevent SQL injection
+    $allowedSortFields = ['nama_perkara_persidangan_tersangka', 'nomor_perkara_persidangan_tersangka', 'nrp', 'nama', 'nama_perkara', 'status_perkara_persidangan_tersangka', 'tanggal_penetapan_tersangka', 'tanggal_registrasi_tersangka', 'nama_oditur'];
+    if (!in_array($sortField, $allowedSortFields)) {
+        $sortField = 'perkara_persidangan_tersangka.nama_perkara_persidangan_tersangka'; // Default to waktu_mulai_kegiatan if the provided field is not allowed
+    }
+
+    // Modify your SQL query to include pagination and filtering
+    $query = "SELECT perkara_persidangan_tersangka.*, wbp_profile.*, wbp_perkara.*,oditur.nama_oditur,
+                kategori_perkara.nama_kategori_perkara,
+                jenis_perkara.*
+              FROM perkara_persidangan_tersangka
+              LEFT JOIN wbp_profile ON perkara_persidangan_tersangka.wbp_profile_id = wbp_profile.wbp_profile_id
+              LEFT JOIN wbp_perkara ON perkara_persidangan_tersangka.wbp_perkara_id = wbp_perkara.wbp_perkara_id
+              LEFT JOIN kategori_perkara ON wbp_perkara.kategori_perkara_id = kategori_perkara.kategori_perkara_id
+              LEFT JOIN jenis_perkara ON wbp_perkara.jenis_perkara_id = jenis_perkara.jenis_perkara_id
+              LEFT JOIN oditur ON perkara_persidangan_tersangka.oditur_id = oditur.oditur_id
+              WHERE perkara_persidangan_tersangka.is_deleted = 0";
+
+
+    if (!empty($filter_nama_perkara_persidangan_tersangka)) {
+        $query .= " AND perkara_persidangan_tersangka.nama_perkara_persidangan_tersangka LIKE '%$filter_nama_perkara_persidangan_tersangka%'";
+    }
+
+    if (!empty($filter_nomor_perkara_persidangan_tersangka)) {
+        $query .= " AND perkara_persidangan_tersangka.nomor_perkara_persidangan_tersangka LIKE '%$filter_nomor_perkara_persidangan_tersangka%'";
+    }
+
+    if (!empty($filter_nrp)) {
+        $query .= " AND wbp_profile.nrp LIKE '%$filter_nrp%'";
+    }
+
+    if (!empty($filter_nama_wbp)) {
+        $query .= " AND wbp_profile.nama LIKE '%$filter_nama_wbp%'";
+    }
+
+    if (!empty($filter_nama_perkara)) {
+        $query .= " AND jenis_perkara.nama_jenis_perkara LIKE '%$filter_nama_perkara%'";
+    }
+
+    if (!empty($filter_status_perkara_persidangan_tersangka)) {
+        $query .= " AND perkara_persidangan_tersangka.status_perkara_persidangan_tersangka LIKE '%$filter_status_perkara_persidangan_tersangka%'";
+    }
+
+    if (!empty($filter_tanggal_penetapan_tersangka)) {
+        $query .= " AND perkara_persidangan_tersangka.tanggal_penetapan_tersangka LIKE '%$filter_tanggal_penetapan_tersangka%'";
+    }
+
+    if (!empty($filter_tanggal_registrasi_tersangka)) {
+        $query .= " AND perkara_persidangan_tersangka.tanggal_registrasi_tersangka LIKE '%$filter_tanggal_registrasi_tersangka%'";
+    }
+
+    if (!empty($filter_nama_oditur)) {
+        $query .= " AND oditur.nama_oditur LIKE '%$filter_nama_oditur%'";
+    }
+    $query .= " ORDER BY perkara_persidangan_tersangka.nama_perkara_persidangan_tersangka ASC LIMIT :offset, :pageSize";
+
+    $stmt = $conn->prepare($query);
+    $stmt->bindParam(':offset', $offset, PDO::PARAM_INT);
+    $stmt->bindParam(':pageSize', $pageSize, PDO::PARAM_INT);
+    $stmt->execute();
+    $res = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $record = $res;
+
+    $totalCountQuery = "SELECT COUNT(*) FROM perkara_persidangan_tersangka WHERE is_deleted = 0";
+
+    $stmt = $conn->prepare($totalCountQuery);
+    $stmt->execute();
+    $totalCount = $stmt->fetchColumn();
+
+    // Create a response object with pagination info
+    $result = array(
+        "status" => "OK",
+        "message" => "",
+        "records" => $record,
+        "pagination" => array(
+            "currentPage" => $page,
+            "pageSize" => $pageSize,
+            "totalRecords" => $totalCount,
+            "totalPages" => ceil($totalCount / $pageSize)
+        )
+    );
+
+    echo json_encode($result);
+} catch (Exception $e) {
+    $result = '{"status":"error", "message":"' . $e->getMessage() . '", "records":[]}';
+    echo $result;
+} finally {
+    // Close the database connection
+    if ($conn) {
+        $conn = null;
+    }
+    if ($stmt) {
+        $stmt = null;
+    }
+}
+?>
